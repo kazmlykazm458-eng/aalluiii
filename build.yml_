@@ -1,0 +1,40 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install buildozer cython==0.29.36 requests
+
+    - name: Build APK with Buildozer
+      run: |
+        if [ ! -f buildozer.spec ]; then
+          buildozer init
+        fi
+        sed -i 's/# title = My Application/title = CalculatorApp/g' buildozer.spec
+        sed -i 's/# package.name = myapp/package.name = calculatorapp/g' buildozer.spec
+        sed -i 's/# package.domain = org.test/package.domain = org.calc/g' buildozer.spec
+        sed -i 's/# requirements = python3,kivy/requirements = python3,kivy,requests/g' buildozer.spec
+        buildozer -v android debug
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk
+        path: bin/*.apk
