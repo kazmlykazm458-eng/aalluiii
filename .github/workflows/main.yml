@@ -33,7 +33,7 @@ jobs:
         path: |
           .buildozer
           ~/.buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}
+        key: buildozer-fresh-v3-${{ hashFiles('buildozer.spec') }}
 
     - name: Install Buildozer
       run: |
