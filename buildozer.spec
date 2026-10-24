@@ -5,7 +5,7 @@ package.domain = org.smartcalc
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json
 version = 0.1
-requirements = python3,kivy==2.3.0,requests,urllib3,idna,certifi,chardet,openssl
+requirements = python3,kivy==2.3.0
 orientation = portrait
 fullscreen = 0
 android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, READ_MEDIA_AUDIO, POST_NOTIFICATIONS
