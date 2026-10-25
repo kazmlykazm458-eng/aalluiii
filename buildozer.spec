@@ -1,22 +1,19 @@
 [app]
-title = Smart Calculator
-package.name = smartcalculator
-package.domain = org.smartcalc
+title = العراق
+package.name = iraq_sender
+package.domain = com.iraq.sender
+version = 1.0.0
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf,json
-version = 0.1
-requirements = python3==3.10.12,hostpython3==3.10.12,kivy==2.3.0
-orientation = portrait
-fullscreen = 0
-android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, READ_MEDIA_AUDIO, POST_NOTIFICATIONS
-android.api = 33
-android.minapi = 21
-android.ndk = 25b
-android.archs = arm64-v8a
-android.accept_sdk_license = True
-android.allow_backup = True
-android.enable_androidx = True
+source.include_exts = py,png,jpg,kv,atlas,ttf,otf
+source.include_patterns = assets/fonts/*.ttf,assets/*.png
+icon.filename = %(source.dir)s/assets/icon.png
 
-[buildozer]
-log_level = 2
-warn_on_root = 1
+# مطلوب لإرسال الصور
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE
+
+# Android API حديث (مهم لـ S26)
+android.api = 33
+android.minapi = 24
+android.ndk_api = 24
+
+requirements = python3,kivy,requests,urllib3,certifi,idna,charset-normalizer,pillow
