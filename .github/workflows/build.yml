@@ -30,6 +30,26 @@ jobs:
           pip install --user --upgrade buildozer "cython<3" virtualenv pillow
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+      - name: Pin stable build settings
+        run: |
+          python - <<'EOF'
+          import re
+          p = 'buildozer.spec'
+          s = open(p, encoding='utf-8').read()
+          vals = {
+              'p4a.branch': 'v2024.01.21',
+              'android.ndk': '25b',
+              'android.api': '33',
+              'android.archs': 'arm64-v8a',
+          }
+          for k in vals:
+              s = re.sub(r'^[ \t]*#?[ \t]*' + re.escape(k) + r'[ \t]*=.*\n', '', s, flags=re.M)
+          block = ''.join(f'{k} = {v}\n' for k, v in vals.items())
+          s = s.replace('[app]\n', '[app]\n' + block, 1)
+          open(p, 'w', encoding='utf-8').write(s)
+          EOF
+          grep -nE "^(p4a.branch|android.ndk|android.api|android.archs|requirements)" buildozer.spec
+
       - name: Download Arabic font
         run: |
           mkdir -p assets/fonts
