@@ -21,13 +21,13 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt update
-          # تثبيت الحزم الأساسية (تم إزالة libtinfo5 من السطر التالي)
+          # تثبيت الحزم الأساسية
           sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool \
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
             cmake libffi-dev libssl-dev
             
-          # تحميل وتثبيت libtinfo5 يدوياً لأنها غير موجودة في Ubuntu 24.04
-          wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+          # تحميل وتثبيت libtinfo5 من خادم موثوق (الرابط الجديد)
+          wget https://mirrors.kernel.org/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
           sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
           rm -f libtinfo5_6.3-2ubuntu0.1_amd64.deb
 
@@ -39,8 +39,7 @@ jobs:
       - name: Download Arabic font
         run: |
           mkdir -p assets/fonts
-          curl -L -o assets/fonts/NotoNaskhArabic-Regular.ttf \
-            https://github.com/notofonts/arabic/raw/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf
+          curl -L -o assets/fonts/NotoNaskhArabic-Regular.ttf "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf"
 
       - name: Generate icon
         run: python make_icon.py
