@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
@@ -21,15 +21,9 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt update
-          # تثبيت الحزم الأساسية
           sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool \
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
-            cmake libffi-dev libssl-dev
-            
-          # تحميل وتثبيت libtinfo5 من خادم موثوق (الرابط الجديد)
-          wget https://mirrors.kernel.org/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-          sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
-          rm -f libtinfo5_6.3-2ubuntu0.1_amd64.deb
+            cmake libffi-dev libssl-dev libtinfo5
 
       - name: Install Python deps
         run: |
@@ -46,7 +40,7 @@ jobs:
 
       - name: Build APK
         run: |
-          yes | buildozer android debug 2>&1 | tail -50
+          yes | buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
