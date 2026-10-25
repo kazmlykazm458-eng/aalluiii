@@ -18,10 +18,16 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Install system deps
         run: |
           sudo apt update
-          sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool \
+          sudo apt install -y git zip unzip autoconf libtool \
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
             cmake libffi-dev libssl-dev libtinfo5
 
@@ -48,7 +54,6 @@ jobs:
           s = s.replace('[app]\n', '[app]\n' + block, 1)
           open(p, 'w', encoding='utf-8').write(s)
           EOF
-          grep -nE "^(p4a.branch|android.ndk|android.api|android.archs|requirements)" buildozer.spec
 
       - name: Download Arabic font
         run: |
@@ -60,13 +65,17 @@ jobs:
 
       - name: Build APK
         run: |
+          java -version
           yes | buildozer android debug > build.log 2>&1
 
       - name: Extract error
         if: failure()
         run: |
-          grep -n -i -E "error|failed|exception|not found" build.log | tail -40 > errors.txt
-          tail -80 build.log >> errors.txt
+          java -version > errors.txt 2>&1
+          echo "=== WHAT WENT WRONG ===" >> errors.txt
+          grep -n -A25 "What went wrong" build.log | head -80 >> errors.txt
+          echo "=== CAUSED BY ===" >> errors.txt
+          grep -n -i "caused by" build.log | head -20 >> errors.txt
 
       - name: Upload error log
         if: failure()
