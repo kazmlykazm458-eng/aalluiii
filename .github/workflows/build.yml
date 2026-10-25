@@ -27,7 +27,7 @@ jobs:
 
       - name: Install Python deps
         run: |
-          pip install --user --upgrade buildozer cython virtualenv pillow
+          pip install --user --upgrade buildozer "cython<3" virtualenv pillow
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Download Arabic font
@@ -40,7 +40,20 @@ jobs:
 
       - name: Build APK
         run: |
-          yes | buildozer android debug
+          yes | buildozer android debug > build.log 2>&1
+
+      - name: Extract error
+        if: failure()
+        run: |
+          grep -n -i -E "error|failed|exception|not found" build.log | tail -40 > errors.txt
+          tail -80 build.log >> errors.txt
+
+      - name: Upload error log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-log
+          path: errors.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
