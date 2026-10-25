@@ -1,47 +1,12 @@
-name: Build Iraq APK
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install system deps
-        run: |
-          sudo apt update
-          sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool \
-            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
-            libtinfo5 cmake libffi-dev libssl-dev
-
-      - name: Install Python deps
-        run: |
-          pip install --user --upgrade buildozer cython virtualenv pillow
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Download Arabic font
-        run: |
-          mkdir -p assets/fonts
-          curl -L -o assets/fonts/NotoNaskhArabic-Regular.ttf \
-            https://github.com/notofonts/arabic/raw/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf
-
-      - name: Generate icon
-        run: python make_icon.py
-
-      - name: Build APK
-        run: |
-          yes | buildozer android debug 2>&1 | tail -50
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: iraq-apk
-          path: bin/*.apk
+- name: Install system deps
+  run: |
+    sudo apt update
+    # تثبيت الحزم الأساسية (تم إزالة libtinfo5 من السطر التالي)
+    sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool \
+      pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+      cmake libffi-dev libssl-dev
+      
+    # تحميل وتثبيت libtinfo5 يدوياً لأنها غير موجودة في Ubuntu 24.04
+    wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+    sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
+    rm -f libtinfo5_6.3-2ubuntu0.1_amd64.deb
