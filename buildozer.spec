@@ -35,7 +35,6 @@ version = 1.0.0
 # version.filename = %(source.dir)s/main.py
 
 # (list) Application requirements
-# تأكدنا من إزالة مكتبات اللغة العربية مؤقتاً لعزل المشكلة
 requirements = python3,kivy,requests,urllib3,certifi,idna,charset-normalizer
 
 # (str) Custom source folders for requirements
@@ -67,8 +66,8 @@ orientation = portrait
 # (bool) Indicate if the application should be fullscreen or not
 fullscreen = 0
 
-# (list) Permissions
-android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
+# (list) Permissions (تحديث شامل لأذونات أندرويد الحديثة)
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, MANAGE_EXTERNAL_STORAGE
 
 # (int) Target Android API, should be as high as possible.
 android.api = 33
